@@ -25,11 +25,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         Product Requirements Refinement System
       </p>
       <p className="text-lg text-neutral-300 mb-6">
-        Get comprehensive product requirements analysis from domain experts, UX/UI specialists, and technical architects.
+        Get comprehensive product requirements analysis from domain experts, UX/UI specialists, technical architects, and revenue model analysts.
       </p>
     </div>
     
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 w-full max-w-4xl">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 w-full max-w-6xl">
       <div className="bg-neutral-700 p-4 rounded-lg">
         <h3 className="text-lg font-semibold text-blue-400 mb-2">Domain Expert</h3>
         <p className="text-sm text-neutral-300">Business logic, industry standards, compliance requirements</p>
@@ -41,6 +41,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
       <div className="bg-neutral-700 p-4 rounded-lg">
         <h3 className="text-lg font-semibold text-purple-400 mb-2">Technical Architect</h3>
         <p className="text-sm text-neutral-300">System architecture, scalability, implementation</p>
+      </div>
+      <div className="bg-neutral-700 p-4 rounded-lg">
+        <h3 className="text-lg font-semibold text-orange-400 mb-2">Revenue Model Analyst</h3>
+        <p className="text-sm text-neutral-300">Revenue models, monetization strategies, pricing</p>
       </div>
     </div>
     

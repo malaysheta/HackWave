@@ -15,6 +15,7 @@ import {
   Pen,
   ChevronDown,
   ChevronUp,
+  DollarSign,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -48,6 +49,8 @@ export function ActivityTimeline({
       return <Search className="h-4 w-4 text-neutral-400" />;
     } else if (title.toLowerCase().includes("finalizing")) {
       return <Pen className="h-4 w-4 text-neutral-400" />;
+    } else if (title.toLowerCase().includes("revenue")) {
+      return <DollarSign className="h-4 w-4 text-neutral-400" />;
     }
     return <Activity className="h-4 w-4 text-neutral-400" />;
   };

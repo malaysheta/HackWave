@@ -24,6 +24,7 @@ interface Message {
     domain_analysis?: string;
     ux_analysis?: string;
     technical_analysis?: string;
+    revenue_analysis?: string;
     moderator_aggregation?: string;
     debate_resolution?: string;
   };

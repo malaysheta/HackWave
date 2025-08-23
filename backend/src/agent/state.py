@@ -13,6 +13,7 @@ class QueryType(Enum):
     DOMAIN = "domain"
     UX_UI = "ux_ui"
     TECHNICAL = "technical"
+    REVENUE = "revenue"
     GENERAL = "general"
 
 
@@ -20,6 +21,7 @@ class DebateCategory(Enum):
     DOMAIN_EXPERT = "domain_expert"
     UX_UI_SPECIALIST = "ux_ui_specialist"
     TECHNICAL_ARCHITECT = "technical_architect"
+    REVENUE_MODEL_ANALYST = "revenue_model_analyst"
     MODERATOR = "moderator"
 
 
@@ -31,6 +33,7 @@ class OverallState(TypedDict):
     domain_expert_analysis: Optional[str]
     ux_ui_specialist_analysis: Optional[str]
     technical_architect_analysis: Optional[str]
+    revenue_model_analyst_analysis: Optional[str]
     moderator_aggregation: Optional[str]
     debate_resolution: Optional[str]
     final_answer: Optional[str]
@@ -58,11 +61,19 @@ class TechnicalArchitectState(TypedDict):
     technical_concerns: List[str]
 
 
+class RevenueModelAnalystState(TypedDict):
+    user_query: str
+    revenue_analysis: str
+    revenue_requirements: List[str]
+    revenue_concerns: List[str]
+
+
 class ModeratorState(TypedDict):
     user_query: str
     domain_analysis: Optional[str]
     ux_analysis: Optional[str]
     technical_analysis: Optional[str]
+    revenue_analysis: Optional[str]
     aggregated_requirements: List[str]
     conflict_resolution: Optional[str]
     final_recommendations: List[str]

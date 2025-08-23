@@ -60,7 +60,7 @@ export const InputForm: React.FC<InputFormProps> = ({
           value={internalInputValue}
           onChange={(e) => setInternalInputValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Describe your product requirements or ask about specific aspects like user interface, technical architecture, or business logic..."
+          placeholder="Describe your product requirements or ask about specific aspects like user interface, technical architecture, business logic, or revenue models..."
           className={`w-full text-neutral-100 placeholder-neutral-500 resize-none border-0 focus:outline-none focus:ring-0 outline-none focus-visible:ring-0 shadow-none
                         md:text-base  min-h-[56px] max-h-[200px]`}
           rows={1}
@@ -128,6 +128,12 @@ export const InputForm: React.FC<InputFormProps> = ({
                   className="hover:bg-neutral-600 focus:bg-neutral-600 cursor-pointer"
                 >
                   Technical Architect
+                </SelectItem>
+                <SelectItem
+                  value="revenue"
+                  className="hover:bg-neutral-600 focus:bg-neutral-600 cursor-pointer"
+                >
+                  Revenue Model Analyst
                 </SelectItem>
               </SelectContent>
             </Select>

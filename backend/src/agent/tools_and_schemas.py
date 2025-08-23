@@ -7,6 +7,7 @@ class QueryType(Enum):
     DOMAIN = "domain"
     UX_UI = "ux_ui"
     TECHNICAL = "technical"
+    REVENUE = "revenue"
     GENERAL = "general"
 
 
@@ -14,6 +15,7 @@ class DebateCategory(Enum):
     DOMAIN_EXPERT = "domain_expert"
     UX_UI_SPECIALIST = "ux_ui_specialist"
     TECHNICAL_ARCHITECT = "technical_architect"
+    REVENUE_MODEL_ANALYST = "revenue_model_analyst"
     MODERATOR = "moderator"
 
 
@@ -59,6 +61,24 @@ class TechnicalArchitectAnalysis(BaseModel):
     )
     scalability_considerations: List[str] = Field(
         description="List of scalability considerations for the technical implementation."
+    )
+
+
+class RevenueModelAnalystAnalysis(BaseModel):
+    revenue_analysis: str = Field(
+        description="Detailed analysis of revenue model and monetization aspects of the product requirements."
+    )
+    revenue_requirements: List[str] = Field(
+        description="List of revenue and monetization requirements identified from the analysis."
+    )
+    revenue_concerns: List[str] = Field(
+        description="List of revenue-related concerns or potential issues."
+    )
+    monetization_strategies: List[str] = Field(
+        description="List of potential monetization strategies and revenue streams."
+    )
+    pricing_considerations: List[str] = Field(
+        description="List of pricing considerations and market positioning factors."
     )
 
 

@@ -15,6 +15,7 @@ interface Message {
     domain_analysis?: string;
     ux_analysis?: string;
     technical_analysis?: string;
+    revenue_analysis?: string;
     moderator_aggregation?: string;
     debate_resolution?: string;
   };
@@ -41,6 +42,7 @@ export default function App() {
     domain_analysis?: string;
     ux_analysis?: string;
     technical_analysis?: string;
+    revenue_analysis?: string;
     moderator_aggregation?: string;
     final_answer?: string;
   }>({});
@@ -96,6 +98,10 @@ export default function App() {
         {
           title: "Technical Architect Analysis",
           data: "Analyzing technical architecture and implementation requirements...",
+        },
+        {
+          title: "Revenue Model Analyst Analysis",
+          data: "Analyzing revenue models and monetization strategies...",
         },
         {
           title: "Moderator Aggregation",
@@ -188,6 +194,11 @@ export default function App() {
       case 'technical_architect':
         setStreamingMetadata((prev: any) => ({ ...prev, technical_analysis: event.content }));
         setCurrentStreamingMessage((prev: string) => prev + "\n\n**Technical Architect Analysis:**\n" + event.content);
+        break;
+      
+      case 'revenue_model_analyst':
+        setStreamingMetadata((prev: any) => ({ ...prev, revenue_analysis: event.content }));
+        setCurrentStreamingMessage((prev: string) => prev + "\n\n**Revenue Model Analyst Analysis:**\n" + event.content);
         break;
       
       case 'moderator_aggregation':

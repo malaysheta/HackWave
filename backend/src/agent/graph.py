@@ -3,11 +3,12 @@ import time
 import asyncio
 from typing import List
 
-from agent.tools_and_schemas import (
+from src.agent.tools_and_schemas import (
     QueryClassification,
     DomainExpertAnalysis,
     UXUISpecialistAnalysis,
     TechnicalArchitectAnalysis,
+    RevenueModelAnalystAnalysis,
     ModeratorAggregation,
     DebateAnalysis,
     QueryType,
@@ -21,21 +22,23 @@ from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
 from google.genai import Client
 
-from agent.state import (
+from src.agent.state import (
     OverallState,
     DomainExpertState,
     UXUISpecialistState,
     TechnicalArchitectState,
+    RevenueModelAnalystState,
     ModeratorState,
     DebateAnalysisState,
 )
-from agent.configuration import Configuration
-from agent.prompts import (
+from src.agent.configuration import Configuration
+from src.agent.prompts import (
     get_current_date,
     query_classification_instructions,
     domain_expert_instructions,
     ux_ui_specialist_instructions,
     technical_architect_instructions,
+    revenue_model_analyst_instructions,
     moderator_aggregation_instructions,
     debate_analysis_instructions,
     final_answer_instructions,
@@ -55,7 +58,7 @@ genai_client = Client(api_key=os.getenv("GEMINI_API_KEY"))
 async def classify_query(state: OverallState, config: RunnableConfig) -> OverallState:
     """LangGraph node that classifies user queries to determine routing to appropriate specialists.
     
-    Analyzes the user query to determine whether it's a domain, UX/UI, technical, or general query,
+    Analyzes the user query to determine whether it's a domain, UX/UI, technical, revenue, or general query,
     and routes it accordingly. Also handles debate detection and routing.
     
     Args:
@@ -125,17 +128,21 @@ def route_to_specialists(state: OverallState) -> List[Send]:
         routes.append(Send("domain_expert", {"user_query": state["user_query"]}))
         routes.append(Send("ux_ui_specialist", {"user_query": state["user_query"]}))
         routes.append(Send("technical_architect", {"user_query": state["user_query"]}))
+        routes.append(Send("revenue_model_analyst", {"user_query": state["user_query"]}))
     elif state["query_type"] == QueryType.DOMAIN:
         routes.append(Send("domain_expert", {"user_query": state["user_query"]}))
     elif state["query_type"] == QueryType.UX_UI:
         routes.append(Send("ux_ui_specialist", {"user_query": state["user_query"]}))
     elif state["query_type"] == QueryType.TECHNICAL:
         routes.append(Send("technical_architect", {"user_query": state["user_query"]}))
+    elif state["query_type"] == QueryType.REVENUE:
+        routes.append(Send("revenue_model_analyst", {"user_query": state["user_query"]}))
     else:
         # Default fallback - route to all specialists
         routes.append(Send("domain_expert", {"user_query": state["user_query"]}))
         routes.append(Send("ux_ui_specialist", {"user_query": state["user_query"]}))
         routes.append(Send("technical_architect", {"user_query": state["user_query"]}))
+        routes.append(Send("revenue_model_analyst", {"user_query": state["user_query"]}))
     
     return routes
 
@@ -289,6 +296,59 @@ Scalability Considerations:
     }
 
 
+async def revenue_model_analyst_analysis(state: RevenueModelAnalystState, config: RunnableConfig) -> OverallState:
+    """LangGraph node for Revenue Model Analyst analysis.
+    
+    Analyzes product requirements from a revenue and monetization perspective,
+    focusing on business models, pricing strategies, and financial sustainability.
+    
+    Args:
+        state: Current graph state containing the user query
+        config: Configuration for the runnable
+        
+    Returns:
+        Dictionary with state update containing revenue model analyst analysis
+    """
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Initialize Gemini 2.0 Flash for revenue model analyst analysis
+    llm = ChatGoogleGenerativeAI(
+        model=configurable.model,
+        temperature=0.7,
+        max_retries=2,
+        api_key=os.getenv("GEMINI_API_KEY"),
+    )
+    structured_llm = llm.with_structured_output(RevenueModelAnalystAnalysis)
+    
+    # Format the prompt
+    current_date = get_current_date()
+    formatted_prompt = revenue_model_analyst_instructions.format(
+        user_query=state["user_query"],
+        current_date=current_date,
+    )
+    
+    # Generate revenue model analyst analysis using async execution
+    result = await structured_llm.ainvoke(formatted_prompt)
+    
+    return {
+        "revenue_model_analyst_analysis": f"""
+Revenue Analysis: {result.revenue_analysis}
+
+Revenue Requirements:
+{chr(10).join(f"- {req}" for req in result.revenue_requirements)}
+
+Revenue Concerns:
+{chr(10).join(f"- {concern}" for concern in result.revenue_concerns)}
+
+Monetization Strategies:
+{chr(10).join(f"- {strategy}" for strategy in result.monetization_strategies)}
+
+Pricing Considerations:
+{chr(10).join(f"- {consideration}" for consideration in result.pricing_considerations)}
+        """.strip()
+    }
+
+
 async def analyze_debate(state: DebateAnalysisState, config: RunnableConfig) -> OverallState:
     """LangGraph node for debate analysis and routing.
     
@@ -366,6 +426,7 @@ async def moderator_aggregation(state: ModeratorState, config: RunnableConfig) -
         domain_analysis=state.get("domain_expert_analysis", "No domain analysis provided"),
         ux_analysis=state.get("ux_ui_specialist_analysis", "No UX/UI analysis provided"),
         technical_analysis=state.get("technical_architect_analysis", "No technical analysis provided"),
+        revenue_analysis=state.get("revenue_model_analyst_analysis", "No revenue analysis provided"),
         user_query=state["user_query"],
         current_date=current_date,
     )
@@ -438,6 +499,7 @@ builder.add_node("classify_query", classify_query)
 builder.add_node("domain_expert", domain_expert_analysis)
 builder.add_node("ux_ui_specialist", ux_ui_specialist_analysis)
 builder.add_node("technical_architect", technical_architect_analysis)
+builder.add_node("revenue_model_analyst", revenue_model_analyst_analysis)
 builder.add_node("analyze_debate", analyze_debate)
 builder.add_node("moderator_aggregation", moderator_aggregation)
 builder.add_node("finalize_answer", finalize_answer)
@@ -449,7 +511,7 @@ builder.add_edge(START, "classify_query")
 builder.add_conditional_edges(
     "classify_query", 
     lambda state: "analyze_debate" if state.get("debate_category") else route_to_specialists(state),
-    ["analyze_debate", "domain_expert", "ux_ui_specialist", "technical_architect"]
+    ["analyze_debate", "domain_expert", "ux_ui_specialist", "technical_architect", "revenue_model_analyst"]
 )
 
 # Route debate analysis to appropriate specialist or moderator
@@ -459,15 +521,17 @@ builder.add_conditional_edges(
         DebateCategory.DOMAIN_EXPERT: "domain_expert",
         DebateCategory.UX_UI_SPECIALIST: "ux_ui_specialist", 
         DebateCategory.TECHNICAL_ARCHITECT: "technical_architect",
+        DebateCategory.REVENUE_MODEL_ANALYST: "revenue_model_analyst",
         DebateCategory.MODERATOR: "moderator_aggregation"
     }.get(state.get("debate_category"), "moderator_aggregation"),
-    ["domain_expert", "ux_ui_specialist", "technical_architect", "moderator_aggregation"]
+    ["domain_expert", "ux_ui_specialist", "technical_architect", "revenue_model_analyst", "moderator_aggregation"]
 )
 
 # Route specialist analyses to moderator aggregation
 builder.add_edge("domain_expert", "moderator_aggregation")
 builder.add_edge("ux_ui_specialist", "moderator_aggregation")
 builder.add_edge("technical_architect", "moderator_aggregation")
+builder.add_edge("revenue_model_analyst", "moderator_aggregation")
 
 # Route moderator aggregation to final answer
 builder.add_edge("moderator_aggregation", "finalize_answer")
