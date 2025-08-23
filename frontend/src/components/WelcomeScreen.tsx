@@ -6,12 +6,14 @@ interface WelcomeScreenProps {
     effort: string
   ) => void;
   onCancel: () => void;
+  onNewAnalysis: () => void;
   isLoading: boolean;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   handleSubmit,
   onCancel,
+  onNewAnalysis,
   isLoading,
 }) => (
   <div className="h-full flex flex-col items-center justify-center text-center px-4 flex-1 w-full max-w-3xl mx-auto gap-4">
@@ -47,6 +49,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         onSubmit={handleSubmit}
         isLoading={isLoading}
         onCancel={onCancel}
+        onNewAnalysis={onNewAnalysis}
         hasHistory={false}
       />
     </div>

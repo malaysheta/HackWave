@@ -244,6 +244,7 @@ interface ChatMessagesViewProps {
   scrollAreaRef: React.RefObject<HTMLDivElement | null>;
   onSubmit: (inputValue: string, effort: string) => void;
   onCancel: () => void;
+  onNewAnalysis: () => void;
   liveActivityEvents: ProcessedEvent[];
   historicalActivities: Record<string, ProcessedEvent[]>;
   streamingMessage?: string;
@@ -255,6 +256,7 @@ export function ChatMessagesView({
   scrollAreaRef,
   onSubmit,
   onCancel,
+  onNewAnalysis,
   liveActivityEvents,
   historicalActivities,
   streamingMessage,
@@ -333,6 +335,16 @@ export function ChatMessagesView({
                 <ReactMarkdown components={mdComponents}>
                   {streamingMessage}
                 </ReactMarkdown>
+                <Button
+                  variant="default"
+                  className={`cursor-pointer bg-neutral-700 border-neutral-600 text-neutral-300 self-end mt-2 ${
+                    streamingMessage.length > 0 ? "visible" : "hidden"
+                  }`}
+                  onClick={() => handleCopy(streamingMessage, "streaming")}
+                >
+                  {copiedMessageId === "streaming" ? "Copied" : "Copy"}
+                  {copiedMessageId === "streaming" ? <CopyCheck /> : <Copy />}
+                </Button>
               </div>
             </div>
           )}
@@ -342,6 +354,7 @@ export function ChatMessagesView({
         onSubmit={onSubmit}
         isLoading={isLoading}
         onCancel={onCancel}
+        onNewAnalysis={onNewAnalysis}
         hasHistory={messages.length > 0}
       />
     </div>

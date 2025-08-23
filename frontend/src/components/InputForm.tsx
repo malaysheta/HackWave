@@ -14,6 +14,7 @@ import {
 interface InputFormProps {
   onSubmit: (inputValue: string, effort: string) => void;
   onCancel: () => void;
+  onNewAnalysis: () => void;
   isLoading: boolean;
   hasHistory: boolean;
 }
@@ -21,6 +22,7 @@ interface InputFormProps {
 export const InputForm: React.FC<InputFormProps> = ({
   onSubmit,
   onCancel,
+  onNewAnalysis,
   isLoading,
   hasHistory,
 }) => {
@@ -135,7 +137,7 @@ export const InputForm: React.FC<InputFormProps> = ({
           <Button
             className="bg-neutral-700 border-neutral-600 text-neutral-300 cursor-pointer rounded-xl rounded-t-sm pl-2 "
             variant="default"
-            onClick={() => window.location.reload()}
+            onClick={onNewAnalysis}
           >
             <SquarePen size={16} />
             New Analysis

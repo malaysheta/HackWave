@@ -225,9 +225,8 @@ export default function App() {
           [aiMessage.id]: [...processedEventsTimeline],
         }));
 
-        // Reset streaming state
-        setCurrentStreamingMessage("");
-        setStreamingMetadata({});
+        // Keep the streaming message visible - it will be cleared when a new analysis starts
+        // This ensures the output persists until user clicks "New Analysis"
         break;
       
       case 'error':
@@ -244,6 +243,16 @@ export default function App() {
     setStreamingMetadata({});
   }, []);
 
+  const handleNewAnalysis = useCallback(() => {
+    setMessages([]);
+    setProcessedEventsTimeline([]);
+    setHistoricalActivities({});
+    setError(null);
+    setCurrentStreamingMessage("");
+    setStreamingMetadata({});
+    setIsLoading(false);
+  }, []);
+
   return (
     <div className="flex h-screen bg-neutral-800 text-neutral-100 font-sans antialiased">
       <main className="h-full w-full max-w-4xl mx-auto">
@@ -252,6 +261,7 @@ export default function App() {
               handleSubmit={handleSubmit}
               isLoading={isLoading}
               onCancel={handleCancel}
+              onNewAnalysis={handleNewAnalysis}
             />
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-full">
@@ -274,6 +284,7 @@ export default function App() {
               scrollAreaRef={scrollAreaRef}
               onSubmit={handleSubmit}
               onCancel={handleCancel}
+              onNewAnalysis={handleNewAnalysis}
               liveActivityEvents={processedEventsTimeline}
               historicalActivities={historicalActivities}
               streamingMessage={currentStreamingMessage}
