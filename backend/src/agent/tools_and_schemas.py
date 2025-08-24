@@ -2,6 +2,8 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 
+from src.agent.state import AgentType, SupervisorDecision
+
 
 class QueryType(Enum):
     DOMAIN = "domain"
@@ -17,6 +19,24 @@ class DebateCategory(Enum):
     TECHNICAL_ARCHITECT = "technical_architect"
     REVENUE_MODEL_ANALYST = "revenue_model_analyst"
     MODERATOR = "moderator"
+
+
+class SupervisorAnalysis(BaseModel):
+    next_agent: AgentType = Field(
+        description="The next agent that should be called to continue the analysis."
+    )
+    decision: SupervisorDecision = Field(
+        description="The supervisor's decision on how to proceed."
+    )
+    reasoning: str = Field(
+        description="Detailed reasoning for the supervisor's decision."
+    )
+    confidence_score: float = Field(
+        description="Confidence score for the decision (0.0 to 1.0)."
+    )
+    estimated_completion_steps: int = Field(
+        description="Estimated number of steps remaining to complete the analysis."
+    )
 
 
 class DomainExpertAnalysis(BaseModel):

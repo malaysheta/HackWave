@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TypedDict, List, Optional
+from typing import TypedDict, List, Optional, Dict, Any
 from enum import Enum
 
 from langgraph.graph import add_messages
@@ -25,6 +25,21 @@ class DebateCategory(Enum):
     MODERATOR = "moderator"
 
 
+class AgentType(Enum):
+    SUPERVISOR = "supervisor"
+    DOMAIN_EXPERT = "domain_expert"
+    UX_UI_SPECIALIST = "ux_ui_specialist"
+    TECHNICAL_ARCHITECT = "technical_architect"
+    REVENUE_MODEL_ANALYST = "revenue_model_analyst"
+    MODERATOR = "moderator"
+
+
+class SupervisorDecision(Enum):
+    CONTINUE = "continue"
+    END = "end"
+    DEBATE = "debate"
+
+
 class OverallState(TypedDict):
     messages: Annotated[list, add_messages]
     user_query: str
@@ -38,6 +53,14 @@ class OverallState(TypedDict):
     debate_resolution: Optional[str]
     final_answer: Optional[str]
     processing_time: float
+    # Supervisor-related fields
+    active_agent: Optional[AgentType]
+    supervisor_decision: Optional[SupervisorDecision]
+    supervisor_reasoning: Optional[str]
+    agent_history: List[Dict[str, Any]]
+    current_step: int
+    max_steps: int
+    is_complete: bool
 
 
 class DomainExpertState(TypedDict):
@@ -84,6 +107,20 @@ class DebateAnalysisState(TypedDict):
     debate_content: str
     debate_category: DebateCategory
     routing_decision: str
+
+
+class SupervisorState(TypedDict):
+    user_query: str
+    current_step: int
+    max_steps: int
+    agent_history: List[Dict[str, Any]]
+    domain_expert_analysis: Optional[str]
+    ux_ui_specialist_analysis: Optional[str]
+    technical_architect_analysis: Optional[str]
+    revenue_model_analyst_analysis: Optional[str]
+    moderator_aggregation: Optional[str]
+    debate_resolution: Optional[str]
+    final_answer: Optional[str]
 
 
 @dataclass(kw_only=True)

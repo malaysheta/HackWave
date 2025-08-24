@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
-from agent.graph import graph
-from agent.state import OverallState, QueryType, DebateCategory
+from src.agent.graph import graph
+from src.agent.state import OverallState, QueryType, DebateCategory, AgentType, SupervisorDecision
 
 
 # Define request/response models
@@ -32,13 +32,15 @@ class ProductRequirementsResponse(BaseModel):
     technical_analysis: Optional[str] = None
     moderator_aggregation: Optional[str] = None
     debate_resolution: Optional[str] = None
+    agent_history: Optional[list] = None
+    supervisor_reasoning: Optional[str] = None
 
 
 # Define the FastAPI app
 app = FastAPI(
-    title="Multi-Agent Product Requirements Refinement System",
-    description="A sophisticated multi-agent AI system for refining product requirements with debate handling capabilities",
-    version="1.0.0"
+    title="Supervisor-Based Multi-Agent Product Requirements Refinement System",
+    description="A sophisticated supervisor-based multi-agent AI system for refining product requirements with dynamic routing and debate handling capabilities",
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -82,32 +84,34 @@ def create_frontend_router(build_dir="../frontend/dist"):
 
 
 async def stream_graph_execution(initial_state: OverallState) -> AsyncGenerator[str, None]:
-    """Stream the graph execution with real-time updates."""
+    """Stream the graph execution with real-time updates for Supervisor-based architecture."""
     
     try:
         # Run the graph and capture results
         result = await graph.ainvoke(initial_state)
         
-        # Stream each analysis with delays to simulate real-time updates
-        if result.get("domain_expert_analysis"):
-            await asyncio.sleep(0.5)  # Simulate processing time
-            yield f"data: {json.dumps({'type': 'domain_expert', 'content': result['domain_expert_analysis']})}\n\n"
+        # Stream supervisor decisions and agent activities
+        agent_history = result.get("agent_history", [])
         
-        if result.get("ux_ui_specialist_analysis"):
-            await asyncio.sleep(0.5)  # Simulate processing time
-            yield f"data: {json.dumps({'type': 'ux_ui_specialist', 'content': result['ux_ui_specialist_analysis']})}\n\n"
-        
-        if result.get("technical_architect_analysis"):
-            await asyncio.sleep(0.5)  # Simulate processing time
-            yield f"data: {json.dumps({'type': 'technical_architect', 'content': result['technical_architect_analysis']})}\n\n"
-        
-        if result.get("moderator_aggregation"):
-            await asyncio.sleep(0.5)  # Simulate processing time
-            yield f"data: {json.dumps({'type': 'moderator_aggregation', 'content': result['moderator_aggregation']})}\n\n"
-        
-        if result.get("final_answer"):
-            await asyncio.sleep(0.5)  # Simulate processing time
-            yield f"data: {json.dumps({'type': 'final_answer', 'content': result['final_answer']})}\n\n"
+        for entry in agent_history:
+            await asyncio.sleep(0.3)  # Simulate processing time
+            
+            if entry.get("agent") == "supervisor":
+                yield f"data: {json.dumps({'type': 'supervisor_decision', 'content': entry.get('reasoning', 'Supervisor analyzing...')})}\n\n"
+            elif entry.get("agent") == "domain_expert":
+                yield f"data: {json.dumps({'type': 'domain_expert', 'content': result.get('domain_expert_analysis', 'Domain analysis completed')})}\n\n"
+            elif entry.get("agent") == "ux_ui_specialist":
+                yield f"data: {json.dumps({'type': 'ux_ui_specialist', 'content': result.get('ux_ui_specialist_analysis', 'UX/UI analysis completed')})}\n\n"
+            elif entry.get("agent") == "technical_architect":
+                yield f"data: {json.dumps({'type': 'technical_architect', 'content': result.get('technical_architect_analysis', 'Technical analysis completed')})}\n\n"
+            elif entry.get("agent") == "revenue_model_analyst":
+                yield f"data: {json.dumps({'type': 'revenue_model_analyst', 'content': result.get('revenue_model_analyst_analysis', 'Revenue analysis completed')})}\n\n"
+            elif entry.get("agent") == "moderator":
+                yield f"data: {json.dumps({'type': 'moderator_aggregation', 'content': result.get('moderator_aggregation', 'Moderator aggregation completed')})}\n\n"
+            elif entry.get("agent") == "debate_analyzer":
+                yield f"data: {json.dumps({'type': 'debate_analysis', 'content': result.get('debate_resolution', 'Debate analysis completed')})}\n\n"
+            elif entry.get("agent") == "finalizer":
+                yield f"data: {json.dumps({'type': 'final_answer', 'content': result.get('final_answer', 'Final answer generated')})}\n\n"
         
         # Send completion signal
         yield f"data: {json.dumps({'type': 'complete'})}\n\n"
@@ -121,20 +125,21 @@ async def stream_graph_execution(initial_state: OverallState) -> AsyncGenerator[
 @app.post("/api/refine-requirements", response_model=ProductRequirementsResponse)
 async def refine_product_requirements(request: ProductRequirementsRequest):
     """
-    Refine product requirements using the multi-agent system.
+    Refine product requirements using the supervisor-based multi-agent system.
     
-    This endpoint processes product requirement queries through specialized agents:
+    This endpoint processes product requirement queries through a Supervisor that coordinates:
     - Domain Expert: Analyzes business logic and domain-specific requirements
     - UX/UI Specialist: Handles user experience and interface design requirements
     - Technical Architect: Manages technical architecture and implementation requirements
+    - Revenue Model Analyst: Analyzes revenue models and monetization strategies
     - Moderator/Aggregator: Consolidates feedback and resolves conflicts
     
-    The system also includes debate handling capabilities for resolving conflicts efficiently.
+    The Supervisor dynamically routes queries and handles debate resolution efficiently.
     """
     try:
         start_time = time.time()
         
-        # Prepare the initial state
+        # Prepare the initial state with Supervisor-related fields
         initial_state: OverallState = {
             "messages": [HumanMessage(content=request.query)],
             "user_query": request.query,
@@ -143,10 +148,19 @@ async def refine_product_requirements(request: ProductRequirementsRequest):
             "domain_expert_analysis": None,
             "ux_ui_specialist_analysis": None,
             "technical_architect_analysis": None,
+            "revenue_model_analyst_analysis": None,
             "moderator_aggregation": None,
             "debate_resolution": None,
             "final_answer": None,
-            "processing_time": 0.0
+            "processing_time": 0.0,
+            # Supervisor-related fields
+            "active_agent": None,
+            "supervisor_decision": None,
+            "supervisor_reasoning": None,
+            "agent_history": [],
+            "current_step": 1,
+            "max_steps": 10,
+            "is_complete": False
         }
         
         # If debate content is provided, add it to the state
@@ -177,7 +191,9 @@ async def refine_product_requirements(request: ProductRequirementsRequest):
             ux_analysis=result.get("ux_ui_specialist_analysis"),
             technical_analysis=result.get("technical_architect_analysis"),
             moderator_aggregation=result.get("moderator_aggregation"),
-            debate_resolution=result.get("debate_resolution")
+            debate_resolution=result.get("debate_resolution"),
+            agent_history=result.get("agent_history"),
+            supervisor_reasoning=result.get("supervisor_reasoning")
         )
         
     except Exception as e:
@@ -189,11 +205,11 @@ async def refine_product_requirements_stream(request: ProductRequirementsRequest
     """
     Stream product requirements refinement using Server-Sent Events.
     
-    This endpoint provides real-time streaming of the multi-agent analysis process,
-    allowing the frontend to display progress updates as each specialist completes their analysis.
+    This endpoint provides real-time streaming of the supervisor-based multi-agent analysis process,
+    allowing the frontend to display progress updates as the Supervisor coordinates each specialist.
     """
     try:
-        # Prepare the initial state
+        # Prepare the initial state with Supervisor-related fields
         initial_state: OverallState = {
             "messages": [HumanMessage(content=request.query)],
             "user_query": request.query,
@@ -202,10 +218,19 @@ async def refine_product_requirements_stream(request: ProductRequirementsRequest
             "domain_expert_analysis": None,
             "ux_ui_specialist_analysis": None,
             "technical_architect_analysis": None,
+            "revenue_model_analyst_analysis": None,
             "moderator_aggregation": None,
             "debate_resolution": None,
             "final_answer": None,
-            "processing_time": 0.0
+            "processing_time": 0.0,
+            # Supervisor-related fields
+            "active_agent": None,
+            "supervisor_decision": None,
+            "supervisor_reasoning": None,
+            "agent_history": [],
+            "current_step": 1,
+            "max_steps": 10,
+            "is_complete": False
         }
         
         # If debate content is provided, add it to the state
@@ -232,15 +257,18 @@ async def refine_product_requirements_stream(request: ProductRequirementsRequest
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint for the multi-agent system."""
+    """Health check endpoint for the supervisor-based multi-agent system."""
     return {
         "status": "healthy",
-        "system": "Multi-Agent Product Requirements Refinement System",
-        "version": "1.0.0",
+        "system": "Supervisor-Based Multi-Agent Product Requirements Refinement System",
+        "version": "2.0.0",
+        "architecture": "Supervisor-based with dynamic routing",
         "agents": [
+            "Supervisor (Orchestrator)",
             "Domain Expert",
             "UX/UI Specialist", 
             "Technical Architect",
+            "Revenue Model Analyst",
             "Moderator/Aggregator",
             "Debate Handler"
         ]
@@ -249,9 +277,14 @@ async def health_check():
 
 @app.get("/api/agents")
 async def get_agents_info():
-    """Get information about available specialist agents."""
+    """Get information about available specialist agents and the Supervisor."""
     return {
         "agents": {
+            "supervisor": {
+                "name": "Supervisor (Orchestrator)",
+                "description": "Coordinates and directs the workflow by deciding which specialist agent should act next",
+                "expertise": ["Workflow Orchestration", "Dynamic Routing", "Decision Making", "Agent Coordination", "State Management"]
+            },
             "domain_expert": {
                 "name": "Domain Expert",
                 "description": "Analyzes business logic, industry standards, compliance requirements, and domain-specific knowledge",
@@ -266,6 +299,11 @@ async def get_agents_info():
                 "name": "Technical Architect",
                 "description": "Analyzes technical architecture, system design, scalability, and implementation requirements",
                 "expertise": ["System Architecture", "Technology Stack", "Scalability", "Performance", "Security"]
+            },
+            "revenue_model_analyst": {
+                "name": "Revenue Model Analyst",
+                "description": "Analyzes revenue models, monetization strategies, pricing, and financial sustainability",
+                "expertise": ["Revenue Models", "Monetization", "Pricing Strategies", "Business Models", "Financial Analysis"]
             },
             "moderator": {
                 "name": "Moderator/Aggregator",

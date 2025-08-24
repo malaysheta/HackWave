@@ -1,7 +1,7 @@
 import os
 import time
 import asyncio
-from typing import List
+from typing import List, Dict, Any
 
 from src.agent.tools_and_schemas import (
     QueryClassification,
@@ -11,12 +11,12 @@ from src.agent.tools_and_schemas import (
     RevenueModelAnalystAnalysis,
     ModeratorAggregation,
     DebateAnalysis,
+    SupervisorAnalysis,
     QueryType,
     DebateCategory,
 )
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage
-from langgraph.types import Send
 from langgraph.graph import StateGraph
 from langgraph.graph import START, END
 from langchain_core.runnables import RunnableConfig
@@ -30,10 +30,14 @@ from src.agent.state import (
     RevenueModelAnalystState,
     ModeratorState,
     DebateAnalysisState,
+    SupervisorState,
+    AgentType,
+    SupervisorDecision,
 )
 from src.agent.configuration import Configuration
 from src.agent.prompts import (
     get_current_date,
+    supervisor_instructions,
     query_classification_instructions,
     domain_expert_instructions,
     ux_ui_specialist_instructions,
@@ -61,16 +65,79 @@ def get_genai_client():
     return _genai_client
 
 
-# Nodes
-async def classify_query(state: OverallState, config: RunnableConfig) -> OverallState:
-    """LangGraph node that classifies user queries to determine routing to appropriate specialists.
+# Supervisor Node - The main orchestrator
+async def supervisor_node(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Supervisor node that decides which agent should act next.
     
-    Analyzes the user query to determine whether it's a domain, UX/UI, technical, revenue, or general query,
-    and routes it accordingly. Also handles debate detection and routing.
+    This is the main orchestrator that analyzes the current state and determines
+    the next action in the workflow.
+    
+    Args:
+        state: Current graph state
+        config: Configuration for the runnable
+        
+    Returns:
+        Dictionary with state update including supervisor decision and next agent
+    """
+    configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
+    
+    # Initialize Gemini 2.0 Flash for supervisor analysis
+    llm = ChatGoogleGenerativeAI(
+        model=configurable.model,
+        temperature=0.3,
+        max_retries=2,
+        api_key=os.getenv("GEMINI_API_KEY"),
+    )
+    structured_llm = llm.with_structured_output(SupervisorAnalysis)
+    
+    # Format the prompt with current state
+    current_date = get_current_date()
+    formatted_prompt = supervisor_instructions.format(
+        user_query=state["user_query"],
+        current_step=state.get("current_step", 1),
+        max_steps=state.get("max_steps", 10),
+        agent_history=state.get("agent_history", []),
+        domain_expert_analysis=state.get("domain_expert_analysis", "Not completed"),
+        ux_ui_specialist_analysis=state.get("ux_ui_specialist_analysis", "Not completed"),
+        technical_architect_analysis=state.get("technical_architect_analysis", "Not completed"),
+        revenue_model_analyst_analysis=state.get("revenue_model_analyst_analysis", "Not completed"),
+        moderator_aggregation=state.get("moderator_aggregation", "Not completed"),
+        debate_resolution=state.get("debate_resolution", "Not applicable"),
+        current_date=current_date,
+    )
+    
+    # Get supervisor decision using async execution
+    result = await structured_llm.ainvoke(formatted_prompt)
+    
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "supervisor",
+        "decision": result.decision.value,
+        "next_agent": result.next_agent.value,
+        "reasoning": result.reasoning,
+        "timestamp": time.time()
+    })
+    
+    return {
+        "active_agent": result.next_agent,
+        "supervisor_decision": result.decision,
+        "supervisor_reasoning": result.reasoning,
+        "agent_history": agent_history,
+        "current_step": state.get("current_step", 1) + 1,
+        "processing_time": time.time() - start_time
+    }
+
+
+# Query Classification Node (now called by Supervisor)
+async def classify_query(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Classify user queries to determine initial routing.
     
     Args:
         state: Current graph state containing the user query
-        config: Configuration for the runnable, including LLM provider settings
+        config: Configuration for the runnable
         
     Returns:
         Dictionary with state update, including query_type and debate_category
@@ -102,7 +169,6 @@ async def classify_query(state: OverallState, config: RunnableConfig) -> Overall
     is_debate = any(keyword in state["user_query"].lower() for keyword in debate_keywords)
     
     if is_debate:
-        # Route to debate analysis
         return {
             "query_type": QueryType.GENERAL,
             "debate_category": DebateCategory.MODERATOR,
@@ -116,49 +182,9 @@ async def classify_query(state: OverallState, config: RunnableConfig) -> Overall
     }
 
 
-def route_to_specialists(state: OverallState) -> List[Send]:
-    """LangGraph node that routes queries to appropriate specialist agents.
-    
-    Based on the query classification, routes to one or more specialist agents
-    for parallel processing.
-    
-    Args:
-        state: Current graph state containing the query type
-        
-    Returns:
-        List of Send objects to route to appropriate specialists
-    """
-    routes = []
-    
-    # For general queries, route to all specialists
-    if state["query_type"] == QueryType.GENERAL:
-        routes.append(Send("domain_expert", {"user_query": state["user_query"]}))
-        routes.append(Send("ux_ui_specialist", {"user_query": state["user_query"]}))
-        routes.append(Send("technical_architect", {"user_query": state["user_query"]}))
-        routes.append(Send("revenue_model_analyst", {"user_query": state["user_query"]}))
-    elif state["query_type"] == QueryType.DOMAIN:
-        routes.append(Send("domain_expert", {"user_query": state["user_query"]}))
-    elif state["query_type"] == QueryType.UX_UI:
-        routes.append(Send("ux_ui_specialist", {"user_query": state["user_query"]}))
-    elif state["query_type"] == QueryType.TECHNICAL:
-        routes.append(Send("technical_architect", {"user_query": state["user_query"]}))
-    elif state["query_type"] == QueryType.REVENUE:
-        routes.append(Send("revenue_model_analyst", {"user_query": state["user_query"]}))
-    else:
-        # Default fallback - route to all specialists
-        routes.append(Send("domain_expert", {"user_query": state["user_query"]}))
-        routes.append(Send("ux_ui_specialist", {"user_query": state["user_query"]}))
-        routes.append(Send("technical_architect", {"user_query": state["user_query"]}))
-        routes.append(Send("revenue_model_analyst", {"user_query": state["user_query"]}))
-    
-    return routes
-
-
-async def domain_expert_analysis(state: DomainExpertState, config: RunnableConfig) -> OverallState:
-    """LangGraph node for Domain Expert analysis.
-    
-    Analyzes product requirements from a business and domain perspective,
-    focusing on business logic, industry standards, and domain-specific requirements.
+# Specialist Agent Nodes (now callable by Supervisor)
+async def domain_expert_analysis(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Domain Expert analysis node.
     
     Args:
         state: Current graph state containing the user query
@@ -168,6 +194,7 @@ async def domain_expert_analysis(state: DomainExpertState, config: RunnableConfi
         Dictionary with state update containing domain expert analysis
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for domain expert analysis
     llm = ChatGoogleGenerativeAI(
@@ -188,6 +215,15 @@ async def domain_expert_analysis(state: DomainExpertState, config: RunnableConfi
     # Generate domain expert analysis using async execution
     result = await structured_llm.ainvoke(formatted_prompt)
     
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "domain_expert",
+        "analysis_completed": True,
+        "timestamp": time.time()
+    })
+    
     return {
         "domain_expert_analysis": f"""
 Domain Analysis: {result.domain_analysis}
@@ -199,15 +235,14 @@ Domain Concerns:
 {chr(10).join(f"- {concern}" for concern in result.domain_concerns)}
 
 Priority Level: {result.priority_level}
-        """.strip()
+        """.strip(),
+        "agent_history": agent_history,
+        "processing_time": time.time() - start_time
     }
 
 
-async def ux_ui_specialist_analysis(state: UXUISpecialistState, config: RunnableConfig) -> OverallState:
-    """LangGraph node for UX/UI Specialist analysis.
-    
-    Analyzes product requirements from a user experience and interface design perspective,
-    focusing on usability, accessibility, and user interaction patterns.
+async def ux_ui_specialist_analysis(state: OverallState, config: RunnableConfig) -> OverallState:
+    """UX/UI Specialist analysis node.
     
     Args:
         state: Current graph state containing the user query
@@ -217,6 +252,7 @@ async def ux_ui_specialist_analysis(state: UXUISpecialistState, config: Runnable
         Dictionary with state update containing UX/UI specialist analysis
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for UX/UI specialist analysis
     llm = ChatGoogleGenerativeAI(
@@ -237,6 +273,15 @@ async def ux_ui_specialist_analysis(state: UXUISpecialistState, config: Runnable
     # Generate UX/UI specialist analysis using async execution
     result = await structured_llm.ainvoke(formatted_prompt)
     
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "ux_ui_specialist",
+        "analysis_completed": True,
+        "timestamp": time.time()
+    })
+    
     return {
         "ux_ui_specialist_analysis": f"""
 UX Analysis: {result.ux_analysis}
@@ -249,15 +294,14 @@ User Experience Concerns:
 
 Accessibility Requirements:
 {chr(10).join(f"- {req}" for req in result.accessibility_requirements)}
-        """.strip()
+        """.strip(),
+        "agent_history": agent_history,
+        "processing_time": time.time() - start_time
     }
 
 
-async def technical_architect_analysis(state: TechnicalArchitectState, config: RunnableConfig) -> OverallState:
-    """LangGraph node for Technical Architect analysis.
-    
-    Analyzes product requirements from a technical architecture perspective,
-    focusing on system design, scalability, performance, and technical implementation.
+async def technical_architect_analysis(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Technical Architect analysis node.
     
     Args:
         state: Current graph state containing the user query
@@ -267,6 +311,7 @@ async def technical_architect_analysis(state: TechnicalArchitectState, config: R
         Dictionary with state update containing technical architect analysis
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for technical architect analysis
     llm = ChatGoogleGenerativeAI(
@@ -287,6 +332,15 @@ async def technical_architect_analysis(state: TechnicalArchitectState, config: R
     # Generate technical architect analysis using async execution
     result = await structured_llm.ainvoke(formatted_prompt)
     
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "technical_architect",
+        "analysis_completed": True,
+        "timestamp": time.time()
+    })
+    
     return {
         "technical_architect_analysis": f"""
 Technical Analysis: {result.technical_analysis}
@@ -299,15 +353,14 @@ Technical Concerns:
 
 Scalability Considerations:
 {chr(10).join(f"- {consideration}" for consideration in result.scalability_considerations)}
-        """.strip()
+        """.strip(),
+        "agent_history": agent_history,
+        "processing_time": time.time() - start_time
     }
 
 
-async def revenue_model_analyst_analysis(state: RevenueModelAnalystState, config: RunnableConfig) -> OverallState:
-    """LangGraph node for Revenue Model Analyst analysis.
-    
-    Analyzes product requirements from a revenue and monetization perspective,
-    focusing on business models, pricing strategies, and financial sustainability.
+async def revenue_model_analyst_analysis(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Revenue Model Analyst analysis node.
     
     Args:
         state: Current graph state containing the user query
@@ -317,6 +370,7 @@ async def revenue_model_analyst_analysis(state: RevenueModelAnalystState, config
         Dictionary with state update containing revenue model analyst analysis
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for revenue model analyst analysis
     llm = ChatGoogleGenerativeAI(
@@ -337,6 +391,15 @@ async def revenue_model_analyst_analysis(state: RevenueModelAnalystState, config
     # Generate revenue model analyst analysis using async execution
     result = await structured_llm.ainvoke(formatted_prompt)
     
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "revenue_model_analyst",
+        "analysis_completed": True,
+        "timestamp": time.time()
+    })
+    
     return {
         "revenue_model_analyst_analysis": f"""
 Revenue Analysis: {result.revenue_analysis}
@@ -352,15 +415,14 @@ Monetization Strategies:
 
 Pricing Considerations:
 {chr(10).join(f"- {consideration}" for consideration in result.pricing_considerations)}
-        """.strip()
+        """.strip(),
+        "agent_history": agent_history,
+        "processing_time": time.time() - start_time
     }
 
 
-async def analyze_debate(state: DebateAnalysisState, config: RunnableConfig) -> OverallState:
-    """LangGraph node for debate analysis and routing.
-    
-    Analyzes debate content to determine the most appropriate specialist
-    to handle the resolution, with a focus on efficiency (under 2 minutes).
+async def analyze_debate(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Debate analysis and routing node.
     
     Args:
         state: Current graph state containing the debate content
@@ -370,6 +432,7 @@ async def analyze_debate(state: DebateAnalysisState, config: RunnableConfig) -> 
         Dictionary with state update containing debate analysis and routing decision
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for debate analysis
     llm = ChatGoogleGenerativeAI(
@@ -383,13 +446,22 @@ async def analyze_debate(state: DebateAnalysisState, config: RunnableConfig) -> 
     # Format the prompt
     current_date = get_current_date()
     formatted_prompt = debate_analysis_instructions.format(
-        debate_content=state["debate_content"],
+        debate_content=state.get("debate_content", state["user_query"]),
         user_query=state["user_query"],
         current_date=current_date,
     )
     
     # Generate debate analysis using async execution
     result = await structured_llm.ainvoke(formatted_prompt)
+    
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "debate_analyzer",
+        "debate_category": result.debate_category.value,
+        "timestamp": time.time()
+    })
     
     return {
         "debate_category": result.debate_category,
@@ -399,15 +471,14 @@ Debate Analysis:
 - Routing Decision: {result.routing_decision}
 - Urgency Level: {result.urgency_level}
 - Estimated Resolution Time: {result.estimated_resolution_time}
-        """.strip()
+        """.strip(),
+        "agent_history": agent_history,
+        "processing_time": time.time() - start_time
     }
 
 
-async def moderator_aggregation(state: ModeratorState, config: RunnableConfig) -> OverallState:
-    """LangGraph node for Moderator/Aggregator analysis.
-    
-    Aggregates feedback from multiple specialist agents and resolves conflicts
-    to create a unified product requirements specification.
+async def moderator_aggregation(state: OverallState, config: RunnableConfig) -> OverallState:
+    """Moderator/Aggregator analysis node.
     
     Args:
         state: Current graph state containing specialist analyses
@@ -417,6 +488,7 @@ async def moderator_aggregation(state: ModeratorState, config: RunnableConfig) -
         Dictionary with state update containing moderator aggregation
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for moderator aggregation
     llm = ChatGoogleGenerativeAI(
@@ -441,6 +513,15 @@ async def moderator_aggregation(state: ModeratorState, config: RunnableConfig) -
     # Generate moderator aggregation using async execution
     result = await structured_llm.ainvoke(formatted_prompt)
     
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "moderator",
+        "aggregation_completed": True,
+        "timestamp": time.time()
+    })
+    
     return {
         "moderator_aggregation": f"""
 Aggregated Requirements:
@@ -454,15 +535,14 @@ Final Recommendations:
 
 Implementation Priority:
 {chr(10).join(f"- {priority}" for priority in result.implementation_priority)}
-        """.strip()
+        """.strip(),
+        "agent_history": agent_history,
+        "processing_time": time.time() - start_time
     }
 
 
 async def finalize_answer(state: OverallState, config: RunnableConfig) -> OverallState:
-    """LangGraph node that finalizes the product requirements answer.
-    
-    Creates a comprehensive, well-structured final answer based on the
-    aggregated specialist analyses and moderator aggregation.
+    """Final answer generation node.
     
     Args:
         state: Current graph state containing all analyses
@@ -472,6 +552,7 @@ async def finalize_answer(state: OverallState, config: RunnableConfig) -> Overal
         Dictionary with state update containing the final answer
     """
     configurable = Configuration.from_runnable_config(config)
+    start_time = time.time()
     
     # Initialize Gemini 2.0 Flash for final answer generation
     llm = ChatGoogleGenerativeAI(
@@ -492,16 +573,80 @@ async def finalize_answer(state: OverallState, config: RunnableConfig) -> Overal
     # Generate final answer using async execution
     result = await llm.ainvoke(formatted_prompt)
     
+    # Update agent history
+    agent_history = state.get("agent_history", [])
+    agent_history.append({
+        "step": state.get("current_step", 1),
+        "agent": "finalizer",
+        "final_answer_generated": True,
+        "timestamp": time.time()
+    })
+    
     return {
         "messages": [AIMessage(content=result.content)],
         "final_answer": result.content,
+        "agent_history": agent_history,
+        "is_complete": True,
+        "processing_time": time.time() - start_time
     }
 
 
-# Create our Multi-Agent Product Requirements Graph
+# Router function for Supervisor-based routing
+def supervisor_router(state: OverallState) -> str:
+    """Router function that determines the next node based on Supervisor decision.
+    
+    Args:
+        state: Current graph state
+        
+    Returns:
+        String indicating the next node to execute
+    """
+    # If we have a final answer, we're done
+    if state.get("is_complete", False):
+        return "finalize_answer"
+    
+    # If we've exceeded max steps, end
+    if state.get("current_step", 1) > state.get("max_steps", 10):
+        return "finalize_answer"
+    
+    # Get the supervisor's decision
+    supervisor_decision = state.get("supervisor_decision")
+    active_agent = state.get("active_agent")
+    
+    if not supervisor_decision or not active_agent:
+        # Initial state, start with supervisor
+        return "supervisor"
+    
+    # Route based on supervisor decision
+    if supervisor_decision == SupervisorDecision.END:
+        return "finalize_answer"
+    elif supervisor_decision == SupervisorDecision.DEBATE:
+        return "analyze_debate"
+    elif supervisor_decision == SupervisorDecision.CONTINUE:
+        # Route to the specific agent the supervisor chose
+        if active_agent == AgentType.DOMAIN_EXPERT:
+            return "domain_expert"
+        elif active_agent == AgentType.UX_UI_SPECIALIST:
+            return "ux_ui_specialist"
+        elif active_agent == AgentType.TECHNICAL_ARCHITECT:
+            return "technical_architect"
+        elif active_agent == AgentType.REVENUE_MODEL_ANALYST:
+            return "revenue_model_analyst"
+        elif active_agent == AgentType.MODERATOR:
+            return "moderator_aggregation"
+        else:
+            # Default to supervisor for unknown agent
+            return "supervisor"
+    
+    # Default fallback
+    return "supervisor"
+
+
+# Create the Supervisor-based Multi-Agent Graph
 builder = StateGraph(OverallState, config_schema=Configuration)
 
-# Define the nodes
+# Define all nodes
+builder.add_node("supervisor", supervisor_node)
 builder.add_node("classify_query", classify_query)
 builder.add_node("domain_expert", domain_expert_analysis)
 builder.add_node("ux_ui_specialist", ux_ui_specialist_analysis)
@@ -514,36 +659,31 @@ builder.add_node("finalize_answer", finalize_answer)
 # Set the entrypoint
 builder.add_edge(START, "classify_query")
 
-# Add conditional edges for routing
+# Add conditional edges for Supervisor-based routing
 builder.add_conditional_edges(
-    "classify_query", 
-    lambda state: "analyze_debate" if state.get("debate_category") else route_to_specialists(state),
-    ["analyze_debate", "domain_expert", "ux_ui_specialist", "technical_architect", "revenue_model_analyst"]
+    "classify_query",
+    lambda state: "supervisor",  # Always go to supervisor after classification
+    ["supervisor"]
 )
 
-# Route debate analysis to appropriate specialist or moderator
+# Add conditional edges from supervisor to all possible agents
 builder.add_conditional_edges(
-    "analyze_debate",
-    lambda state: {
-        DebateCategory.DOMAIN_EXPERT: "domain_expert",
-        DebateCategory.UX_UI_SPECIALIST: "ux_ui_specialist", 
-        DebateCategory.TECHNICAL_ARCHITECT: "technical_architect",
-        DebateCategory.REVENUE_MODEL_ANALYST: "revenue_model_analyst",
-        DebateCategory.MODERATOR: "moderator_aggregation"
-    }.get(state.get("debate_category"), "moderator_aggregation"),
-    ["domain_expert", "ux_ui_specialist", "technical_architect", "revenue_model_analyst", "moderator_aggregation"]
+    "supervisor",
+    supervisor_router,
+    ["domain_expert", "ux_ui_specialist", "technical_architect", "revenue_model_analyst", 
+     "moderator_aggregation", "analyze_debate", "finalize_answer"]
 )
 
-# Route specialist analyses to moderator aggregation
-builder.add_edge("domain_expert", "moderator_aggregation")
-builder.add_edge("ux_ui_specialist", "moderator_aggregation")
-builder.add_edge("technical_architect", "moderator_aggregation")
-builder.add_edge("revenue_model_analyst", "moderator_aggregation")
+# All specialist agents return to supervisor for next decision
+builder.add_edge("domain_expert", "supervisor")
+builder.add_edge("ux_ui_specialist", "supervisor")
+builder.add_edge("technical_architect", "supervisor")
+builder.add_edge("revenue_model_analyst", "supervisor")
+builder.add_edge("moderator_aggregation", "supervisor")
+builder.add_edge("analyze_debate", "supervisor")
 
-# Route moderator aggregation to final answer
-builder.add_edge("moderator_aggregation", "finalize_answer")
-
-# Finalize the answer
+# Finalize answer leads to end
 builder.add_edge("finalize_answer", END)
 
-graph = builder.compile(name="multi-agent-product-requirements")
+# Compile the graph
+graph = builder.compile(name="supervisor-based-multi-agent-product-requirements")
