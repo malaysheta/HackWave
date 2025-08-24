@@ -88,7 +88,7 @@ async def stream_graph_execution(initial_state: OverallState) -> AsyncGenerator[
     
     try:
         # Run the graph and capture results
-        result = await graph.ainvoke(initial_state)
+        result = await graph.ainvoke(initial_state,)
         
         # Stream supervisor decisions and agent activities
         agent_history = result.get("agent_history", [])
