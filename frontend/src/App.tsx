@@ -46,10 +46,112 @@ export default function App() {
     moderator_aggregation?: string;
     final_answer?: string;
   }>({});
+  
+  // Add thread management for context persistence
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<any[]>([]);
 
   const apiUrl = import.meta.env.DEV
     ? "http://localhost:2024"
     : "http://localhost:2024";
+
+  // Generate or retrieve thread ID
+  const getOrCreateThreadId = useCallback(() => {
+    if (!currentThreadId) {
+      const newThreadId = `frontend_thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      setCurrentThreadId(newThreadId);
+      return newThreadId;
+    }
+    return currentThreadId;
+  }, [currentThreadId]);
+
+  // Load conversation history when thread ID changes
+  useEffect(() => {
+    if (currentThreadId) {
+      loadConversationHistory(currentThreadId);
+    }
+  }, [currentThreadId]);
+
+  // Load initial conversation history on app start
+  useEffect(() => {
+    const loadInitialHistory = async () => {
+      try {
+        // Try to load from a default thread or get recent conversations
+        const response = await fetch(`${apiUrl}/api/conversation-history/default`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (response.ok) {
+          const history = await response.json();
+          if (history && history.length > 0) {
+            setConversationHistory(history);
+            
+            // Convert history to messages format and display immediately
+            const historyMessages: Message[] = history.map((entry: any) => ({
+              type: "ai",
+              content: entry.final_answer || entry.user_query || "Previous conversation",
+              id: entry._id || Date.now().toString(),
+              metadata: {
+                processing_time: entry.processing_time,
+                query_type: entry.query_type,
+                domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+                ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+                technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+                revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+                moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+              },
+            }));
+            
+            setMessages(historyMessages);
+            console.log("Loaded conversation history:", historyMessages.length, "messages");
+          }
+        }
+      } catch (error) {
+        console.warn("Could not load initial conversation history:", error);
+      }
+    };
+
+    loadInitialHistory();
+  }, [apiUrl]);
+
+  const loadConversationHistory = async (threadId: string) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/conversation-history/${threadId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (response.ok) {
+        const history = await response.json();
+        setConversationHistory(history);
+        
+        // Convert history to messages format
+        const historyMessages: Message[] = history.map((entry: any) => ({
+          type: "ai",
+          content: entry.final_answer || entry.user_query || "Previous conversation",
+          id: entry._id || Date.now().toString(),
+          metadata: {
+            processing_time: entry.processing_time,
+            query_type: entry.query_type,
+            domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+            ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+            technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+            revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+            moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+          },
+        }));
+        
+        setMessages(historyMessages);
+      }
+    } catch (error) {
+      console.warn("Could not load conversation history:", error);
+    }
+  };
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -65,6 +167,8 @@ export default function App() {
   const handleSubmit = useCallback(
     async (submittedInputValue: string, effort: string) => {
       if (!submittedInputValue.trim()) return;
+      
+      const threadId = getOrCreateThreadId();
       
       setProcessedEventsTimeline([]);
       setIsLoading(true);
@@ -121,7 +225,7 @@ export default function App() {
       }
 
       try {
-        // Use the streaming endpoint
+        // Use the streaming endpoint with thread_id for context
         const response = await fetch(`${apiUrl}/api/refine-requirements/stream`, {
           method: "POST",
           headers: {
@@ -130,6 +234,7 @@ export default function App() {
           body: JSON.stringify({
             query: submittedInputValue,
             query_type: effort, // Use effort as query type hint
+            thread_id: threadId, // Include thread_id for context persistence
           }),
         });
 
@@ -169,6 +274,9 @@ export default function App() {
           reader.releaseLock();
         }
 
+        // After completion, reload conversation history to get updated context
+        await loadConversationHistory(threadId);
+
       } catch (err) {
         console.error('Streaming error:', err);
         setError(err instanceof Error ? err.message : "An error occurred");
@@ -176,7 +284,7 @@ export default function App() {
         setIsLoading(false);
       }
     },
-    [apiUrl]
+    [apiUrl, getOrCreateThreadId, loadConversationHistory]
   );
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
@@ -262,7 +370,48 @@ export default function App() {
     setCurrentStreamingMessage("");
     setStreamingMetadata({});
     setIsLoading(false);
+    // Create a new thread for fresh context
+    setCurrentThreadId(null);
+    setConversationHistory([]);
   }, []);
+
+  const handleLoadHistory = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiUrl}/api/conversation-history/default`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (response.ok) {
+        const history = await response.json();
+        if (history && history.length > 0) {
+          setConversationHistory(history);
+          
+          const historyMessages: Message[] = history.map((entry: any) => ({
+            type: "ai",
+            content: entry.final_answer || entry.user_query || "Previous conversation",
+            id: entry._id || Date.now().toString(),
+            metadata: {
+              processing_time: entry.processing_time,
+              query_type: entry.query_type,
+              domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+              ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+              technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+              revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+              moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+            },
+          }));
+          
+          setMessages(historyMessages);
+          console.log("Refreshed conversation history:", historyMessages.length, "messages");
+        }
+      }
+    } catch (error) {
+      console.warn("Could not load conversation history:", error);
+    }
+  }, [apiUrl]);
 
   return (
     <div className="flex h-screen bg-neutral-800 text-neutral-100 font-sans antialiased">
@@ -273,6 +422,7 @@ export default function App() {
               isLoading={isLoading}
               onCancel={handleCancel}
               onNewAnalysis={handleNewAnalysis}
+              onLoadHistory={handleLoadHistory}
             />
           ) : error ? (
             <div className="flex flex-col items-center justify-center h-full">

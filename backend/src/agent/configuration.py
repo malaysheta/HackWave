@@ -29,6 +29,13 @@ class Configuration(BaseModel):
         },
     )
 
+    thread_id: Optional[str] = Field(
+        default=None,
+        metadata={
+            "description": "Unique identifier for the conversation thread to enable memory persistence."
+        },
+    )
+
     @classmethod
     def from_runnable_config(
         cls, config: Optional[RunnableConfig] = None

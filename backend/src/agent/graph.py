@@ -48,6 +48,7 @@ from src.agent.prompts import (
     final_answer_instructions,
 )
 from langchain_google_genai import ChatGoogleGenerativeAI
+from src.agent.memory import create_memory_manager, create_mongodb_checkpoint_saver
 
 load_dotenv()
 
@@ -82,6 +83,26 @@ async def supervisor_node(state: OverallState, config: RunnableConfig) -> Overal
     configurable = Configuration.from_runnable_config(config)
     start_time = time.time()
     
+    # Get thread_id from config
+    thread_id = configurable.thread_id if hasattr(configurable, 'thread_id') else None
+    
+    # Initialize memory manager
+    memory_manager = create_memory_manager()
+    
+    # Retrieve conversation history if thread_id is available
+    conversation_context = ""
+    if thread_id:
+        try:
+            history = memory_manager.get_conversation_history(thread_id, limit=5)
+            if history:
+                conversation_context = "\n\nPrevious Conversation Context:\n"
+                for entry in reversed(history):  # Show most recent first
+                    conversation_context += f"- Step {entry.get('current_step', 'N/A')}: "
+                    conversation_context += f"{entry.get('user_query', 'No query')} "
+                    conversation_context += f"(Agent: {entry.get('active_agent', 'N/A')})\n"
+        except Exception as e:
+            print(f"Warning: Could not retrieve conversation history: {e}")
+    
     # Initialize Gemini 2.0 Flash for supervisor analysis
     llm = ChatGoogleGenerativeAI(
         model=configurable.model,
@@ -91,7 +112,7 @@ async def supervisor_node(state: OverallState, config: RunnableConfig) -> Overal
     )
     structured_llm = llm.with_structured_output(SupervisorAnalysis)
     
-    # Format the prompt with current state
+    # Format the prompt with current state and conversation history
     current_date = get_current_date()
     formatted_prompt = supervisor_instructions.format(
         user_query=state["user_query"],
@@ -105,6 +126,7 @@ async def supervisor_node(state: OverallState, config: RunnableConfig) -> Overal
         moderator_aggregation=state.get("moderator_aggregation", "Not completed"),
         debate_resolution=state.get("debate_resolution", "Not applicable"),
         current_date=current_date,
+        conversation_context=conversation_context,
     )
     
     # Get supervisor decision using async execution
@@ -120,6 +142,13 @@ async def supervisor_node(state: OverallState, config: RunnableConfig) -> Overal
         "reasoning": result.reasoning,
         "timestamp": time.time()
     })
+    
+    # Save conversation memory if thread_id is available
+    if thread_id:
+        try:
+            memory_manager.save_conversation_memory(thread_id, state)
+        except Exception as e:
+            print(f"Warning: Could not save conversation memory: {e}")
     
     return {
         "active_agent": result.next_agent,
@@ -196,6 +225,12 @@ async def domain_expert_analysis(state: OverallState, config: RunnableConfig) ->
     configurable = Configuration.from_runnable_config(config)
     start_time = time.time()
     
+    # Get thread_id from config
+    thread_id = configurable.thread_id if hasattr(configurable, 'thread_id') else None
+    
+    # Initialize memory manager
+    memory_manager = create_memory_manager()
+    
     # Initialize Gemini 2.0 Flash for domain expert analysis
     llm = ChatGoogleGenerativeAI(
         model=configurable.model,
@@ -224,7 +259,8 @@ async def domain_expert_analysis(state: OverallState, config: RunnableConfig) ->
         "timestamp": time.time()
     })
     
-    return {
+    # Prepare updated state
+    updated_state = {
         "domain_expert_analysis": f"""
 Domain Analysis: {result.domain_analysis}
 
@@ -239,6 +275,17 @@ Priority Level: {result.priority_level}
         "agent_history": agent_history,
         "processing_time": time.time() - start_time
     }
+    
+    # Save conversation memory if thread_id is available
+    if thread_id:
+        try:
+            # Merge current state with updates
+            current_state = {**state, **updated_state}
+            memory_manager.save_conversation_memory(thread_id, current_state)
+        except Exception as e:
+            print(f"Warning: Could not save conversation memory: {e}")
+    
+    return updated_state
 
 
 async def ux_ui_specialist_analysis(state: OverallState, config: RunnableConfig) -> OverallState:
@@ -643,7 +690,7 @@ def supervisor_router(state: OverallState) -> str:
 
 
 # Create the Supervisor-based Multi-Agent Graph
-builder = StateGraph(OverallState, config_schema=Configuration)
+builder = StateGraph(OverallState, context_schema=Configuration)
 
 # Define all nodes
 builder.add_node("supervisor", supervisor_node)
@@ -685,5 +732,7 @@ builder.add_edge("analyze_debate", "supervisor")
 # Finalize answer leads to end
 builder.add_edge("finalize_answer", END)
 
-# Compile the graph
-graph = builder.compile(name="supervisor-based-multi-agent-product-requirements")
+# Compile the graph without custom checkpointer (LangGraph API handles persistence)
+graph = builder.compile(
+    name="supervisor-based-multi-agent-product-requirements"
+)

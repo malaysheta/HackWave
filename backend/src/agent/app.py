@@ -20,6 +20,7 @@ class ProductRequirementsRequest(BaseModel):
     query: str
     query_type: Optional[str] = None
     debate_content: Optional[str] = None
+    thread_id: Optional[str] = None  # Add thread_id for context persistence
 
 
 class ProductRequirementsResponse(BaseModel):
@@ -83,12 +84,24 @@ def create_frontend_router(build_dir="../frontend/dist"):
     return StaticFiles(directory=build_path, html=True)
 
 
-async def stream_graph_execution(initial_state: OverallState) -> AsyncGenerator[str, None]:
+async def stream_graph_execution(initial_state: OverallState, thread_id: Optional[str] = None) -> AsyncGenerator[str, None]:
     """Stream the graph execution with real-time updates for Supervisor-based architecture."""
     
     try:
+        # Prepare configuration with thread_id for context
+        config = {}
+        if thread_id:
+            config = {
+                "configurable": {
+                    "thread_id": thread_id,
+                    "model": "gemini-2.0-flash",
+                    "max_debate_resolution_time": 120,
+                    "enable_parallel_processing": True
+                }
+            }
+        
         # Run the graph and capture results
-        result = await graph.ainvoke(initial_state,)
+        result = await graph.ainvoke(initial_state, config)
         
         # Stream supervisor decisions and agent activities
         agent_history = result.get("agent_history", [])
@@ -168,8 +181,20 @@ async def refine_product_requirements(request: ProductRequirementsRequest):
             initial_state["debate_content"] = request.debate_content
             initial_state["debate_category"] = DebateCategory.MODERATOR
         
+        # Prepare configuration with thread_id for context
+        config = {}
+        if request.thread_id:
+            config = {
+                "configurable": {
+                    "thread_id": request.thread_id,
+                    "model": "gemini-2.0-flash",
+                    "max_debate_resolution_time": 120,
+                    "enable_parallel_processing": True
+                }
+            }
+        
         # Run the graph using async execution
-        result = await graph.ainvoke(initial_state)
+        result = await graph.ainvoke(initial_state, config)
         
         # Calculate total processing time
         total_time = time.time() - start_time
@@ -238,8 +263,9 @@ async def refine_product_requirements_stream(request: ProductRequirementsRequest
             initial_state["debate_content"] = request.debate_content
             initial_state["debate_category"] = DebateCategory.MODERATOR
         
+        # Pass thread_id to the streaming function for context
         return StreamingResponse(
-            stream_graph_execution(initial_state),
+            stream_graph_execution(initial_state, request.thread_id),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -317,6 +343,72 @@ async def get_agents_info():
             }
         }
     }
+
+
+@app.get("/api/conversation-history/{thread_id}")
+async def get_conversation_history(thread_id: str, limit: int = 10):
+    """Get conversation history for a specific thread."""
+    try:
+        from src.agent.memory import create_memory_manager
+        
+        memory_manager = create_memory_manager()
+        history = memory_manager.get_conversation_history(thread_id, limit=limit)
+        memory_manager.close()
+        
+        return history
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving conversation history: {str(e)}")
+
+
+@app.get("/api/conversation-history/default")
+async def get_default_conversation_history(limit: int = 20):
+    """Get recent conversation history from any thread for display."""
+    try:
+        from src.agent.memory import create_memory_manager
+        
+        memory_manager = create_memory_manager()
+        
+        # Get recent conversations from all threads
+        recent_conversations = []
+        
+        # Get all conversations from the database
+        all_conversations = memory_manager.conversations.find().sort("timestamp", -1).limit(limit)
+        
+        for conv in all_conversations:
+            recent_conversations.append({
+                "_id": str(conv["_id"]),
+                "thread_id": conv.get("thread_id", "unknown"),
+                "user_query": conv.get("user_query", ""),
+                "final_answer": conv.get("final_answer", ""),
+                "processing_time": conv.get("processing_time", 0),
+                "query_type": conv.get("query_type", "general"),
+                "timestamp": conv.get("timestamp", ""),
+                "state_snapshot": conv.get("state_snapshot", {})
+            })
+        
+        memory_manager.close()
+        
+        return recent_conversations
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving default conversation history: {str(e)}")
+
+
+@app.delete("/api/conversation-history/{thread_id}")
+async def clear_conversation_history(thread_id: str):
+    """Clear conversation history for a specific thread."""
+    try:
+        from src.agent.memory import create_memory_manager
+        
+        memory_manager = create_memory_manager()
+        success = memory_manager.clear_thread_memory(thread_id)
+        memory_manager.close()
+        
+        if success:
+            return {"message": f"Conversation history cleared for thread {thread_id}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to clear conversation history")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing conversation history: {str(e)}")
 
 
 # Mount the frontend under /app to not conflict with the LangGraph API routes

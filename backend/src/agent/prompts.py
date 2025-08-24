@@ -22,6 +22,7 @@ Your Responsibilities:
 - Handle debate detection and routing to appropriate specialists
 - Ensure all necessary analyses are completed before finalization
 - Decide when the analysis is complete and ready for final answer generation
+- Consider conversation history and context when making decisions
 
 Decision Guidelines:
 - CONTINUE: Route to the next appropriate specialist agent
@@ -38,6 +39,8 @@ Current State:
 - Revenue Model Analyst Analysis: {revenue_model_analyst_analysis}
 - Moderator Aggregation: {moderator_aggregation}
 - Debate Resolution: {debate_resolution}
+
+{conversation_context}
 
 Current Date: {current_date}
 
