@@ -280,7 +280,7 @@ export function ChatMessagesView({
           {messages.map((message, index) => {
             const isLast = index === messages.length - 1;
             return (
-              <div key={message.id || `msg-${index}`} className="space-y-3">
+              <div key={message.id || `msg-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`} className="space-y-3">
                 <div
                   className={`flex items-start gap-3 ${
                     message.type === "human" ? "justify-end" : ""

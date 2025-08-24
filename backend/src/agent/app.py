@@ -353,9 +353,15 @@ async def get_conversation_history(thread_id: str, limit: int = 10):
         
         memory_manager = create_memory_manager()
         history = memory_manager.get_conversation_history(thread_id, limit=limit)
+        memory_context = memory_manager.get_memory_context(thread_id)
+        thread_summary = memory_manager.get_thread_summary(thread_id)
         memory_manager.close()
         
-        return history
+        return {
+            "history": history,
+            "memory_context": memory_context,
+            "thread_summary": thread_summary
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving conversation history: {str(e)}")
 
@@ -391,6 +397,32 @@ async def get_default_conversation_history(limit: int = 20):
         return recent_conversations
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving default conversation history: {str(e)}")
+
+
+@app.get("/api/thread-context/{thread_id}")
+async def get_thread_context(thread_id: str):
+    """Get comprehensive context for a specific thread including history, memory, and summary."""
+    try:
+        from src.agent.memory import create_memory_manager
+        
+        memory_manager = create_memory_manager()
+        
+        # Get all context data
+        history = memory_manager.get_conversation_history(thread_id, limit=20)
+        memory_context = memory_manager.get_memory_context(thread_id)
+        thread_summary = memory_manager.get_thread_summary(thread_id)
+        
+        memory_manager.close()
+        
+        return {
+            "thread_id": thread_id,
+            "history": history,
+            "memory_context": memory_context,
+            "thread_summary": thread_summary,
+            "has_context": len(history) > 0 or memory_context is not None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving thread context: {str(e)}")
 
 
 @app.delete("/api/conversation-history/{thread_id}")

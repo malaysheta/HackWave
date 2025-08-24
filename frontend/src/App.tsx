@@ -65,61 +65,75 @@ export default function App() {
     return currentThreadId;
   }, [currentThreadId]);
 
-  // Load conversation history when thread ID changes
-  useEffect(() => {
-    if (currentThreadId) {
-      loadConversationHistory(currentThreadId);
+  // Function to get thread ID from URL or create new one
+  const getThreadIdFromUrl = useCallback(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const threadId = urlParams.get('thread_id');
+    if (threadId) {
+      setCurrentThreadId(threadId);
+      return threadId;
     }
-  }, [currentThreadId]);
+    return null;
+  }, []);
 
-  // Load initial conversation history on app start
+  // Debug: Log current state
   useEffect(() => {
-    const loadInitialHistory = async () => {
-      try {
-        // Try to load from a default thread or get recent conversations
-        const response = await fetch(`${apiUrl}/api/conversation-history/default`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`Current state - Thread ID: ${currentThreadId}, Messages: ${messages.length}, Loading: ${isLoading}`);
+    }
+  }, [currentThreadId, messages.length, isLoading]);
 
-        if (response.ok) {
-          const history = await response.json();
-          if (history && history.length > 0) {
-            setConversationHistory(history);
-            
-            // Convert history to messages format and display immediately
-            const historyMessages: Message[] = history.map((entry: any) => ({
-              type: "ai",
-              content: entry.final_answer || entry.user_query || "Previous conversation",
-              id: entry._id || Date.now().toString(),
-              metadata: {
-                processing_time: entry.processing_time,
-                query_type: entry.query_type,
-                domain_analysis: entry.state_snapshot?.domain_expert_analysis,
-                ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
-                technical_analysis: entry.state_snapshot?.technical_architect_analysis,
-                revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
-                moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
-              },
-            }));
-            
-            setMessages(historyMessages);
-            console.log("Loaded conversation history:", historyMessages.length, "messages");
+  // Load initial conversation history on app start, but only if no messages exist and no thread ID in URL
+  useEffect(() => {
+    if (messages.length === 0 && !currentThreadId) {
+      const loadInitialHistory = async () => {
+        try {
+          // Try to load from a default thread or get recent conversations
+          const response = await fetch(`${apiUrl}/api/conversation-history/default`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+
+          if (response.ok) {
+            const history = await response.json();
+            if (history && history.length > 0) {
+              setConversationHistory(history);
+              
+              // Convert history to messages format and display immediately
+              const historyMessages: Message[] = history.map((entry: any, index: number) => ({
+                type: "ai",
+                content: entry.final_answer || entry.user_query || "Previous conversation",
+                id: entry._id || `history_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`,
+                metadata: {
+                  processing_time: entry.processing_time,
+                  query_type: entry.query_type,
+                  domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+                  ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+                  technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+                  revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+                  moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+                },
+              }));
+              
+              setMessages(historyMessages);
+              console.log("Loaded conversation history:", historyMessages.length, "messages");
+            }
           }
+        } catch (error) {
+          console.warn("Could not load initial conversation history:", error);
         }
-      } catch (error) {
-        console.warn("Could not load initial conversation history:", error);
-      }
-    };
+      };
 
-    loadInitialHistory();
-  }, [apiUrl]);
+      loadInitialHistory();
+    }
+  }, [apiUrl, messages.length, currentThreadId]);
 
-  const loadConversationHistory = async (threadId: string) => {
+  // Function to check if thread has context and load it
+  const checkAndLoadThreadContext = useCallback(async (threadId: string) => {
     try {
-      const response = await fetch(`${apiUrl}/api/conversation-history/${threadId}`, {
+      const response = await fetch(`${apiUrl}/api/thread-context/${threadId}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -127,26 +141,121 @@ export default function App() {
       });
 
       if (response.ok) {
-        const history = await response.json();
-        setConversationHistory(history);
+        const contextData = await response.json();
         
-        // Convert history to messages format
-        const historyMessages: Message[] = history.map((entry: any) => ({
-          type: "ai",
-          content: entry.final_answer || entry.user_query || "Previous conversation",
-          id: entry._id || Date.now().toString(),
-          metadata: {
-            processing_time: entry.processing_time,
-            query_type: entry.query_type,
-            domain_analysis: entry.state_snapshot?.domain_expert_analysis,
-            ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
-            technical_analysis: entry.state_snapshot?.technical_architect_analysis,
-            revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
-            moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
-          },
-        }));
+        if (contextData.has_context && contextData.history && contextData.history.length > 0) {
+          console.log(`Found existing context for thread ${threadId} with ${contextData.history.length} conversations`);
+          
+          // Convert history to messages format
+          const historyMessages: Message[] = contextData.history.map((entry: any, index: number) => ({
+            type: "ai",
+            content: entry.final_answer || entry.user_query || "Previous conversation",
+            id: entry._id || `history_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`,
+            metadata: {
+              processing_time: entry.processing_time,
+              query_type: entry.query_type,
+              domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+              ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+              technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+              revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+              moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+            },
+          }));
+          
+          setMessages(historyMessages);
+          setConversationHistory(contextData.history);
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.warn("Could not check thread context:", error);
+      return false;
+    }
+  }, [apiUrl]);
+
+  // Load initial conversation history on app start, but only if no messages exist and no thread ID in URL
+  useEffect(() => {
+    if (messages.length === 0 && !currentThreadId) {
+      const loadInitialHistory = async () => {
+        try {
+          // Try to load from a default thread or get recent conversations
+          const response = await fetch(`${apiUrl}/api/conversation-history/default`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+
+          if (response.ok) {
+            const history = await response.json();
+            if (history && history.length > 0) {
+              setConversationHistory(history);
+              
+              // Convert history to messages format and display immediately
+              const historyMessages: Message[] = history.map((entry: any, index: number) => ({
+                type: "ai",
+                content: entry.final_answer || entry.user_query || "Previous conversation",
+                id: entry._id || `history_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`,
+                metadata: {
+                  processing_time: entry.processing_time,
+                  query_type: entry.query_type,
+                  domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+                  ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+                  technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+                  revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+                  moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+                },
+              }));
+              
+              setMessages(historyMessages);
+              console.log("Loaded conversation history:", historyMessages.length, "messages");
+            }
+          }
+        } catch (error) {
+          console.warn("Could not load initial conversation history:", error);
+        }
+      };
+
+      loadInitialHistory();
+    }
+  }, [apiUrl, messages.length, currentThreadId]);
+
+  const loadConversationHistory = async (threadId: string, forceLoad: boolean = false) => {
+    try {
+      const response = await fetch(`${apiUrl}/api/thread-context/${threadId}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (response.ok) {
+        const contextData = await response.json();
+        setConversationHistory(contextData.history || []);
         
-        setMessages(historyMessages);
+        // Only set messages if forceLoad is true and we have history
+        // This prevents overriding current conversation
+        if (forceLoad && contextData.history && contextData.history.length > 0) {
+          // Convert history to messages format
+          const historyMessages: Message[] = contextData.history.map((entry: any, index: number) => ({
+            type: "ai",
+            content: entry.final_answer || entry.user_query || "Previous conversation",
+            id: entry._id || `history_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`,
+            metadata: {
+              processing_time: entry.processing_time,
+              query_type: entry.query_type,
+              domain_analysis: entry.state_snapshot?.domain_expert_analysis,
+              ux_analysis: entry.state_snapshot?.ux_ui_specialist_analysis,
+              technical_analysis: entry.state_snapshot?.technical_architect_analysis,
+              revenue_analysis: entry.state_snapshot?.revenue_model_analyst_analysis,
+              moderator_aggregation: entry.state_snapshot?.moderator_aggregation,
+            },
+          }));
+          
+          setMessages(historyMessages);
+          console.log(`Loaded ${historyMessages.length} messages from thread context`);
+        }
       }
     } catch (error) {
       console.warn("Could not load conversation history:", error);
@@ -170,17 +279,25 @@ export default function App() {
       
       const threadId = getOrCreateThreadId();
       
+      // Check if this thread has existing context and load it if needed
+      if (messages.length === 0) {
+        const hasContext = await checkAndLoadThreadContext(threadId);
+        if (hasContext) {
+          console.log("Loaded existing thread context");
+        }
+      }
+      
       setProcessedEventsTimeline([]);
       setIsLoading(true);
       setError(null);
       setCurrentStreamingMessage("");
       setStreamingMetadata({});
 
-      // Add user message
+      // Add user message with unique ID
       const userMessage: Message = {
         type: "human",
         content: submittedInputValue,
-        id: Date.now().toString(),
+        id: `human_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       };
       
       setMessages(prev => [...prev, userMessage]);
@@ -274,8 +391,8 @@ export default function App() {
           reader.releaseLock();
         }
 
-        // After completion, reload conversation history to get updated context
-        await loadConversationHistory(threadId);
+        // After completion, don't reload conversation history as it might override current messages
+        // The messages are already in the state from the streaming response
 
       } catch (err) {
         console.error('Streaming error:', err);
@@ -284,7 +401,7 @@ export default function App() {
         setIsLoading(false);
       }
     },
-    [apiUrl, getOrCreateThreadId, loadConversationHistory]
+    [apiUrl, getOrCreateThreadId, loadConversationHistory, checkAndLoadThreadContext, messages.length]
   );
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
@@ -324,11 +441,11 @@ export default function App() {
         break;
       
       case 'complete':
-        // Add the final AI message
+        // Add the final AI message with unique ID
         const aiMessage: Message = {
           type: "ai",
           content: currentStreamingMessage || "Analysis completed",
-          id: (Date.now() + 1).toString(),
+          id: `ai_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           metadata: {
             ...streamingMetadata,
             processing_time: 0, // Will be calculated properly
@@ -343,6 +460,13 @@ export default function App() {
           ...prev,
           [aiMessage.id]: [...processedEventsTimeline],
         }));
+
+        // Update URL with thread_id for context persistence
+        if (currentThreadId) {
+          const url = new URL(window.location.href);
+          url.searchParams.set('thread_id', currentThreadId);
+          window.history.replaceState({}, '', url.toString());
+        }
 
         // Keep the streaming message visible - it will be cleared when a new analysis starts
         // This ensures the output persists until user clicks "New Analysis"
@@ -373,6 +497,11 @@ export default function App() {
     // Create a new thread for fresh context
     setCurrentThreadId(null);
     setConversationHistory([]);
+    
+    // Update URL to remove thread_id parameter
+    const url = new URL(window.location.href);
+    url.searchParams.delete('thread_id');
+    window.history.replaceState({}, '', url.toString());
   }, []);
 
   const handleLoadHistory = useCallback(async () => {
@@ -389,10 +518,10 @@ export default function App() {
         if (history && history.length > 0) {
           setConversationHistory(history);
           
-          const historyMessages: Message[] = history.map((entry: any) => ({
+          const historyMessages: Message[] = history.map((entry: any, index: number) => ({
             type: "ai",
             content: entry.final_answer || entry.user_query || "Previous conversation",
-            id: entry._id || Date.now().toString(),
+            id: entry._id || `history_${Date.now()}_${index}_${Math.random().toString(36).substr(2, 9)}`,
             metadata: {
               processing_time: entry.processing_time,
               query_type: entry.query_type,
@@ -412,6 +541,39 @@ export default function App() {
       console.warn("Could not load conversation history:", error);
     }
   }, [apiUrl]);
+
+  // Function to load specific thread context
+  const handleLoadThreadContext = useCallback(async (threadId: string) => {
+    try {
+      const hasContext = await checkAndLoadThreadContext(threadId);
+      if (hasContext) {
+        console.log(`Successfully loaded context for thread: ${threadId}`);
+      } else {
+        console.log(`No context found for thread: ${threadId}`);
+      }
+      return hasContext;
+    } catch (error) {
+      console.warn("Could not load thread context:", error);
+      return false;
+    }
+  }, [checkAndLoadThreadContext]);
+
+  // Check for thread ID in URL on app start
+  useEffect(() => {
+    const urlThreadId = getThreadIdFromUrl();
+    if (urlThreadId) {
+      console.log(`Found thread ID in URL: ${urlThreadId}`);
+      // Load context for this thread
+      checkAndLoadThreadContext(urlThreadId);
+    }
+  }, [getThreadIdFromUrl, checkAndLoadThreadContext]);
+
+  // Load conversation history when thread ID changes, but only if no messages exist
+  useEffect(() => {
+    if (currentThreadId && messages.length === 0) {
+      loadConversationHistory(currentThreadId, true);
+    }
+  }, [currentThreadId, messages.length, loadConversationHistory]);
 
   return (
     <div className="flex h-screen bg-neutral-800 text-neutral-100 font-sans antialiased">
@@ -450,6 +612,13 @@ export default function App() {
               historicalActivities={historicalActivities}
               streamingMessage={currentStreamingMessage}
             />
+          )}
+          
+          {/* Debug info - remove in production */}
+          {process.env.NODE_ENV === 'development' && currentThreadId && (
+            <div className="fixed bottom-4 right-4 bg-neutral-700 p-2 rounded text-xs opacity-50">
+              Thread: {currentThreadId.substring(0, 20)}...
+            </div>
           )}
       </main>
     </div>
