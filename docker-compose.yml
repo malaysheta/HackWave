@@ -28,7 +28,9 @@ services:
       retries: 5
       interval: 5s
   langgraph-api:
-    image: gemini-fullstack-langgraph
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: langgraph-api
     ports:
       - "8123:8000"
@@ -42,3 +44,4 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
       REDIS_URI: redis://langgraph-redis:6379
       POSTGRES_URI: postgres://postgres:postgres@langgraph-postgres:5432/postgres?sslmode=disable
+      BG_JOB_ISOLATED_LOOPS: "true"
